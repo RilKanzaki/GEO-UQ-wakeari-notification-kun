@@ -1,0 +1,45 @@
+name: geo-outlet-watch
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"   # 5分おき(GitHub側の都合で遅れることあり)
+  workflow_dispatch:
+    inputs:
+      test:
+        description: "trueでテスト通知を送る"
+        default: "false"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check stock and notify
+        env:
+          TOPIC: ${{ secrets.NTFY_TOPIC }}
+          URL: https://mvno.geo-mobile.jp/outlet/
+          EXPECTED: "30"   # 全商品が品切れのときの「商品品切れ中」の数
+          TEST: ${{ github.event.inputs.test }}
+        run: |
+          if [ "$TEST" = "true" ]; then
+            curl -s -H "Title: テスト通知" -d "ntfyの接続OKです" "https://ntfy.sh/$TOPIC"
+            exit 0
+          fi
+
+          html=$(curl -s -L -A "Mozilla/5.0" "$URL")
+          total=$(echo "$html" | wc -c)
+          sold=$(echo "$html" | grep -o "商品品切れ中" | wc -l)
+          echo "bytes=$total sold_out=$sold expected=$EXPECTED"
+
+          # ページ取得失敗(空など)の場合は通知しない
+          if [ "$total" -lt 10000 ]; then
+            echo "fetch failed or blocked"; exit 0
+          fi
+
+          if [ "$sold" -lt "$EXPECTED" ]; then
+            curl -s \
+              -H "Title: ゲオ訳アリ品 在庫が出たかも!" \
+              -H "Priority: high" \
+              -H "Click: $URL" \
+              -d "品切れ表示が${EXPECTED}件→${sold}件に減りました。今すぐ確認!" \
+              "https://ntfy.sh/$TOPIC"
+          fi
